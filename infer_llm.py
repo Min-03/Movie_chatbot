@@ -25,7 +25,7 @@ def create_session(temperature=0):
     1) title (do not involve release date)
     2) a 2-3 sentence why it matches
 
-    Provide a clear and concise answer. Only recommend movies from the below context: {context}
+    Provide a clear and concise answer. Do not provide footnote with "[]". Only recommend movies from the below context: {context}
     
     Question: {question}
     Answer:
@@ -47,6 +47,8 @@ def invoke_query(rag_chain, query):
     response = rag_chain.invoke(query)
     titles = re.findall(r"\*\*(.*?)\*\*", response)
     ids = [title2id.get(title) for title in titles]
+    ids = [id for id in ids if id is not None]
+    ids = list(set(ids))
     return response, ids
 
 if __name__ == "__main__":
