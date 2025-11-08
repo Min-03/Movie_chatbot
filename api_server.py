@@ -11,5 +11,5 @@ def create_chain():
 @app.post("/recommend")
 def recommend_movies(query: str, request : Request):
     rag_chain = request.app.state.rag_chain
-    response, ids = invoke_query(rag_chain, query)
-    return {"response": response, "movie_ids": ids}
+    response, ids, titles = invoke_query(rag_chain, query)
+    return {"response": response, "movie_ids": ids, "titles": titles}

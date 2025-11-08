@@ -1,9 +1,10 @@
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import pandas as pd
-# from langchain.embeddings import HuggingFaceEmbeddings
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
+import shutil
+import os
 
 def build_docs(csv_dir, save_dir="/data/chroma", embedding_model="sentence-transformers/all-MiniLM-L6-v2"):
     docs = []
@@ -47,6 +48,14 @@ def test_retriever(query):
         print(doc)
         print("=" * 50)
 
+def reset_chroma(save_dir="/data/chroma"):
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+        print("✅ Chroma store cleared.")
+    else:
+        print("No Chroma store found.")
+
 if __name__ == "__main__":
-    # build_docs(csv_dir="data/movies.csv")
-    test_retriever("recommend me some movies about heros. I especially like actions.")
+    reset_chroma()
+    build_docs(csv_dir="data/movies.csv")
+    test_retriever("recommend me some horror movies where monster comes out")

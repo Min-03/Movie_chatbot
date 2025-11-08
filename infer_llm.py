@@ -1,73 +1,100 @@
 import os
 import re
+from retriever import build_retriever 
 from langchain_community.chat_models import ChatPerplexity
-from retriever import build_retriever
+from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import CrossEncoderReranker
 from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import PydanticOutputParser
 from dotenv import load_dotenv
 from langchain.prompts import ChatPromptTemplate
+from pydantic import BaseModel, Field
+from typing import List, Annotated
 
-title2id = dict()
+class MovieRec(BaseModel):
+    movie_id: str = Field(description="Id of the movie, which is included in metadata")
+    title: str = Field(description="Title of the movie")
+    reason: str = Field(description="Reasons for recommeding the movie, should be 2~3 sentences")
+
+class MovieResponse(BaseModel):
+    results: Annotated[List[MovieRec], Field(min_items=3, max_items=3)]
 
 def format_docs(docs):
-    global title2id
-    title2id = dict()
+    formatted = []
     for doc in docs:
-        movie_id = doc.metadata['movie_id']
-        title = doc.metadata['title']
-        title2id[title] = movie_id
-    return '\n\n'.join(doc.page_content for doc in docs)
+        formatted.append(f"Movie ID:{doc.metadata['movie_id']}\nContent: {doc.page_content}")
+    return "\n\n".join(formatted)
 
 def create_session(temperature=0):
     prompt = ChatPromptTemplate.from_template("""
-    You are a movie recommendation assistant. Recommend three movies from below list, choosing 3 movies that best match user's request.
-    For each chosen movie, give:
-    1) title (do not involve release date)
-    2) a 2-3 sentence why it matches
+    You are a movie recommendation assistant. Recommend exactly three different movies based on the given context.
 
-    Provide a clear and concise answer. Do not provide footnote with "[]". Only recommend movies from the below context: {context}
-    
+    Only recommend movies explicitly included in the context.
+
+    Return results following this JSON schema:
+    {format}
+
+    Context:
+    {context}
+
     Question: {question}
-    Answer:
     """)
     load_dotenv()
-    model = ChatPerplexity(model="sonar", pplx_api_key=os.environ.get("PPLX_API_KEY"), temperature=temperature)
-    retriever = build_retriever()
+    model = ChatPerplexity(model="sonar-pro", pplx_api_key=os.environ.get("PPLX_API_KEY"), temperature=temperature)
+    retriever = build_retriever(search_num=20)
+    reranker = HuggingFaceCrossEncoder(model_name="BAAI/bge-reranker-v2-m3")
+    compressor = CrossEncoderReranker(model=reranker, top_n=5)
+    compression_retriever = ContextualCompressionRetriever(base_compressor=compressor, base_retriever=retriever)
+    parser = PydanticOutputParser(pydantic_object=MovieResponse)
+    prompt = prompt.partial(format=parser.get_format_instructions())
     
     rag_chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        {"context": compression_retriever | format_docs, "question": RunnablePassthrough()}
         | prompt
         | model
-        | StrOutputParser()
+        | parser
     )
 
     return rag_chain
 
 def invoke_query(rag_chain, query):
-    response = rag_chain.invoke(query)
-    titles = re.findall(r"\*\*(.*?)\*\*", response)
-    ids = [title2id.get(title) for title in titles]
-    ids = [id for id in ids if id is not None]
-    ids = list(set(ids))
-    return response, ids
+    response_all = rag_chain.invoke(query)
+    response, ids, titles = [], [], []
+    for rec in response_all.results:
+        response.append(rec.reason)
+        ids.append(rec.movie_id)
+        titles.append(rec.title)
+    return response, ids, titles
 
 if __name__ == "__main__":
     rag_chain = create_session()
-    response, ids = invoke_query(rag_chain, "recommend me some movies about heros. I especially like actions.")
+    response, ids, titles = invoke_query(rag_chain, "recommend me some movies about heros. I especially like actions.")
     print("Answer:\n", response)
     print()
     print()
     print(ids)
+    print()
+    print()
+    print(titles)
     print("=" * 50)
 
-    response, ids = invoke_query(rag_chain, "recommend me some horror movies where monster comes out")
+    response, ids, titles = invoke_query(rag_chain, "recommend me some horror movies where monster comes out")
     print("Answer:\n", response)
     print()
     print()
     print(ids)
+    print()
+    print()
+    print(titles)
+    print("=" * 50)
 
-    response, ids = invoke_query(rag_chain, "recommend me some funny movie where old man is main character")
+
+    response, ids, titles = invoke_query(rag_chain, "recommend me some funny movie where old man is main character")
     print("Answer:\n", response)
     print()
     print()
     print(ids)
+    print()
+    print()
+    print(titles)
